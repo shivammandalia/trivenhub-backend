@@ -1,0 +1,70 @@
+[
+  {
+    "name": "1. Register User",
+    "pass": true
+  },
+  {
+    "name": "1b. Login User",
+    "pass": true
+  },
+  {
+    "name": "2. Create/Approve Reseller",
+    "pass": true
+  },
+  {
+    "name": "3. Create Manual Listing",
+    "pass": true
+  },
+  {
+    "name": "4. Create Auto Listing",
+    "pass": true
+  },
+  {
+    "name": "7. Add Wallet Balance",
+    "pass": true
+  },
+  {
+    "name": "5. Buy Auto Product",
+    "pass": true
+  },
+  {
+    "name": "6. Buy Manual Product",
+    "pass": true
+  },
+  {
+    "name": "6b. Complete OTP Flow",
+    "pass": true
+  },
+  {
+    "name": "8. Verify Escrow Ledger",
+    "pass": true
+  },
+  {
+    "name": "9. Create Withdrawal (Mocked)",
+    "pass": true
+  },
+  {
+    "name": "10. Raise Dispute",
+    "pass": true
+  },
+  {
+    "name": "10b. Resolve Dispute",
+    "pass": true
+  },
+  {
+    "name": "11. Change Admin Settings",
+    "pass": true
+  },
+  {
+    "name": "12. Create God Mode audit log (done via steps 2 & 7)",
+    "pass": true
+  },
+  {
+    "name": "13. Restart backend",
+    "pass": true
+  },
+  {
+    "name": "14. Verify persistence and wallet balances",
+    "pass": true
+  }
+]

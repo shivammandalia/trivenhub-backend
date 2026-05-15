@@ -1,0 +1,18 @@
+[
+  {
+    "id": "disp-1777837068288-6601",
+    "orderId": "ord-1777837068286",
+    "productName": "Manual Product",
+    "amount": 100,
+    "raisedBy": "buyer",
+    "buyerId": "u_1777837068251",
+    "sellerId": "u_1777837068148",
+    "reason": "Fake",
+    "proofImage": null,
+    "status": "resolved",
+    "resolution": "buyer_win",
+    "adminNote": "Refunded",
+    "createdAt": "2026-05-03T19:37:48.288Z",
+    "resolvedAt": "2026-05-03T19:37:48.290Z"
+  }
+]

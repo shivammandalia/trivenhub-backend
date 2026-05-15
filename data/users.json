@@ -1,0 +1,96 @@
+[
+  {
+    "id": "admin_1",
+    "phone": "9820539961",
+    "password": "$2b$10$UM2VVZOiVY3ZJwAEKdEJ..3sgU69k5WIyZLSUDnkz3bAEnyVqLj2S",
+    "role": "admin",
+    "name": "System Admin",
+    "status": "active",
+    "online": true,
+    "createdAt": "2026-05-03T19:37:47.123Z"
+  },
+  {
+    "id": "u_1777837068148",
+    "phone": "9998887776",
+    "password": "$2b$10$zx59hcUL0N0bKLdcx3/xA.uDgdQA36tGc6zVG5vxHcYlpZ4/z.HMK",
+    "role": "reseller",
+    "status": "active",
+    "createdAt": "2026-05-03T19:37:48.148Z",
+    "online": true
+  },
+  {
+    "id": "u_1777837068251",
+    "phone": "1112223334",
+    "password": "$2b$10$R.qNDwDcgJnEweWib5sRLujWNi9d6sEGaqxy/GV8JZL3U2OoDIQ7i",
+    "role": "customer",
+    "status": "active",
+    "createdAt": "2026-05-03T19:37:48.251Z"
+  },
+  {
+    "id": "u_1777837532232",
+    "name": "SHIVAM",
+    "phone": "8850388826",
+    "password": "$2b$10$oB5dPvx7LhAVal2HEWKt/eXSTPUv.M/ahcih55QVnfL.JY7c0r3sy",
+    "role": "customer",
+    "status": "active",
+    "createdAt": "2026-05-03T19:45:32.232Z"
+  },
+  {
+    "id": "u_1777837882138",
+    "name": "TestCust",
+    "phone": "9990001111",
+    "password": "$2b$10$in1G4tSlPwUVWZWX1R7i5uu9mwoNjq68/NiSNLD33MoZjJoi8yLbO",
+    "role": "customer",
+    "status": "active",
+    "createdAt": "2026-05-03T19:51:22.138Z"
+  },
+  {
+    "id": "u_1777837932391",
+    "name": "TestSeller",
+    "phone": "8880001111",
+    "password": "$2b$10$g5DPtV9JpNV2/10/CSKEXOee7Ixeu7ZM2a4QALlRFr.1ehcpAb1V2",
+    "role": "seller",
+    "status": "pending",
+    "createdAt": "2026-05-03T19:52:12.391Z"
+  },
+  {
+    "id": "u0",
+    "phone": "9000000000",
+    "password": "",
+    "name": "Super Admin",
+    "role": "admin",
+    "status": "active",
+    "online": true,
+    "createdAt": "2026-05-03T19:53:25.301Z"
+  },
+  {
+    "id": "u2",
+    "phone": "9000000002",
+    "password": "",
+    "name": "Rahul Sharma",
+    "role": "seller",
+    "status": "active",
+    "online": true,
+    "createdAt": "2026-05-12T16:50:46.832Z"
+  },
+  {
+    "id": "u1",
+    "phone": "9000000001",
+    "password": "",
+    "name": "Arjun Mehta",
+    "role": "customer",
+    "status": "active",
+    "online": true,
+    "createdAt": "2026-05-12T16:53:04.096Z"
+  },
+  {
+    "id": "u3",
+    "phone": "9000000003",
+    "password": "",
+    "name": "VaporTech Labs",
+    "role": "vendor",
+    "status": "active",
+    "online": true,
+    "createdAt": "2026-05-12T17:57:30.060Z"
+  }
+]

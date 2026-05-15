@@ -1,0 +1,22 @@
+[
+  {
+    "id": "lmol1ag0bnimoq6adb4",
+    "adminId": "admin_1",
+    "actionType": "set_status_active",
+    "targetUserId": "u_1777837068148",
+    "targetOrderId": null,
+    "amount": null,
+    "note": "Approve reseller",
+    "createdAt": "2026-05-03T19:37:48.256Z"
+  },
+  {
+    "id": "dio78gmsfxkmoq6adba",
+    "adminId": "admin_1",
+    "actionType": "add_balance",
+    "targetUserId": "u_1777837068251",
+    "targetOrderId": null,
+    "amount": 1000,
+    "note": "Initial test fund",
+    "createdAt": "2026-05-03T19:37:48.262Z"
+  }
+]
