@@ -4,6 +4,9 @@ const cors = require('cors');
 
 const app = express();
 
+const connectDB = require('./db');
+connectDB();
+
 // Middleware
 const corsOptions = {
   origin: [

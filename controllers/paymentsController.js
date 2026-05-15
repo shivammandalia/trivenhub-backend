@@ -1,5 +1,4 @@
-const { usersDB, walletLedgerDB, paymentsDB, saveDB } = require('../models/mockDB');
-const uuidv4 = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+const { User, WalletLedger, Payment } = require('../models');
 
 const getCashfreeHeaders = () => {
   return {
@@ -25,7 +24,7 @@ exports.createOrder = async (req, res) => {
       return res.status(400).json({ error: 'Invalid user or amount (minimum ₹10)' });
     }
 
-    const user = usersDB.find(u => u.id === userId || u.phone === userId);
+    const user = await User.findOne({ $or: [{ id: userId }, { phone: userId }] });
     if (!user) {
       return res.status(404).json({ 
         error: 'User not found. Please login again to sync your account', 
@@ -33,8 +32,6 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    // Generate unique order ID
-    // Note: since we removed uuid dependency previously, I will use a custom ID generator
     const orderId = `cf_ord_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
 
     const orderPayload = {
@@ -56,7 +53,6 @@ exports.createOrder = async (req, res) => {
 
     const data = await response.json();
 
-    // Log response safely
     console.log('Cashfree Create Order Response:', { 
       order_id: data.order_id, 
       order_status: data.order_status, 
@@ -74,15 +70,13 @@ exports.createOrder = async (req, res) => {
     }
 
     // Save order intent to DB
-    paymentsDB.push({
-      orderId,
+    await Payment.create({
+      id: orderId,
       userId,
       amount,
       status: 'pending',
-      paymentSessionId: data.payment_session_id,
-      createdAt: new Date().toISOString()
+      paymentSessionId: data.payment_session_id
     });
-    saveDB('payments');
 
     res.json({
       success: true,
@@ -105,8 +99,7 @@ exports.verifyPayment = async (req, res) => {
       return res.status(400).json({ error: 'Order ID is required' });
     }
 
-    // Find the order in paymentsDB
-    const paymentRecord = paymentsDB.find(p => p.orderId === orderId);
+    const paymentRecord = await Payment.findOne({ id: orderId });
     if (!paymentRecord) {
       return res.status(404).json({ error: 'Payment record not found' });
     }
@@ -129,9 +122,15 @@ exports.verifyPayment = async (req, res) => {
     }
 
     if (data.order_status === 'PAID') {
+      // Check idempotency again right before credit (transaction-like protection)
+      const existingCredit = await WalletLedger.findOne({ referenceId: orderId, type: 'deposit' });
+      if (existingCredit) {
+        return res.status(400).json({ error: 'Payment already credited' });
+      }
+
       // Credit wallet
       const txId = `dep_${Math.random().toString(36).substring(2, 10)}_${Date.now()}`;
-      walletLedgerDB.push({
+      await WalletLedger.create({
         id: txId,
         userId: paymentRecord.userId,
         type: 'deposit',
@@ -139,21 +138,17 @@ exports.verifyPayment = async (req, res) => {
         status: 'completed',
         referenceType: 'payment',
         referenceId: orderId,
-        createdAt: new Date().toISOString(),
-        availableAt: new Date().toISOString()
+        availableAt: new Date()
       });
 
       // Update payment record
       paymentRecord.status = 'SUCCESS';
-      paymentRecord.txId = txId;
-
-      saveDB('walletLedger');
-      saveDB('payments');
+      await paymentRecord.save();
 
       return res.json({ message: 'Payment verified successfully. Wallet updated.', status: 'SUCCESS' });
     } else {
       paymentRecord.status = data.order_status; // FAILED, PENDING, etc
-      saveDB('payments');
+      await paymentRecord.save();
       return res.json({ message: `Payment is ${data.order_status}`, status: data.order_status });
     }
 

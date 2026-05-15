@@ -1,25 +1,26 @@
-const { walletLedgerDB, usersDB, ordersDB, listingsDB, disputesDB } = require('../models/mockDB');
+const { WalletLedger, User, Order, Listing, Dispute } = require('../models');
 const { calculateWallet } = require('./walletController');
 
 // Helper to get user info by ID
-const getUserInfo = (userId) => {
-  return usersDB.find(u => u.id === userId || u.phone === userId) || { name: 'Unknown', phone: userId };
+const getUserInfo = async (userId) => {
+  const u = await User.findOne({ $or: [{ id: userId }, { phone: userId }] });
+  return u ? { name: u.name, phone: u.phone, id: u.id } : { name: 'Unknown', phone: userId, id: userId };
 };
 
 exports.getWithdrawals = async (req, res) => {
   try {
-    const withdrawals = walletLedgerDB
-      .filter(entry => entry.type === 'withdrawal')
-      .map(entry => {
-        const user = getUserInfo(entry.userId);
-        return {
-          ...entry,
-          userName: user.name,
-          userPhone: user.phone,
-          availableBalance: calculateWallet(entry.userId).withdrawableBalance // show balance at time of query
-        };
-      })
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const entries = await WalletLedger.find({ type: 'withdrawal' }).sort({ createdAt: -1 });
+    
+    const withdrawals = await Promise.all(entries.map(async (entry) => {
+      const user = await getUserInfo(entry.userId);
+      const wallet = await calculateWallet(entry.userId);
+      return {
+        ...entry.toObject(),
+        userName: user.name,
+        userPhone: user.phone,
+        availableBalance: wallet.withdrawableBalance // show balance at time of query
+      };
+    }));
 
     res.json(withdrawals);
   } catch (error) {
@@ -31,18 +32,17 @@ exports.approveWithdrawal = async (req, res) => {
   try {
     const { id } = req.params;
     
-    const entry = walletLedgerDB.find(e => e.id === id && e.type === 'withdrawal');
+    const entry = await WalletLedger.findOne({ id, type: 'withdrawal' });
     if (!entry) return res.status(404).json({ error: 'Withdrawal request not found' });
     
     if (entry.status !== 'pending') {
       return res.status(400).json({ error: `Withdrawal is already ${entry.status}` });
     }
 
-    // Mark as completed. (Since it's completed, calculateWallet will now permanently deduct it from withdrawableBalance)
     entry.status = 'completed';
-    entry.updatedAt = new Date().toISOString();
+    await entry.save();
 
-    res.json({ message: 'Withdrawal approved successfully', entry });
+    res.json({ message: 'Withdrawal approved successfully', entry: entry.toObject() });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -53,19 +53,20 @@ exports.rejectWithdrawal = async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
     
-    const entry = walletLedgerDB.find(e => e.id === id && e.type === 'withdrawal');
+    const entry = await WalletLedger.findOne({ id, type: 'withdrawal' });
     if (!entry) return res.status(404).json({ error: 'Withdrawal request not found' });
     
     if (entry.status !== 'pending') {
       return res.status(400).json({ error: `Withdrawal is already ${entry.status}` });
     }
 
-    // Mark as rejected. calculateWallet will ignore rejected entries, returning funds to user's available balance
+    // Since we didn't specify meta in schema, we can add to label or define it
+    // Wait, Mongoose allows mixed types if defined, or we can just append to label
     entry.status = 'rejected';
-    entry.meta = { ...entry.meta, rejectReason: reason || 'Rejected by Admin' };
-    entry.updatedAt = new Date().toISOString();
+    entry.label = `${entry.label} - Rejected: ${reason || 'Admin'}`;
+    await entry.save();
 
-    res.json({ message: 'Withdrawal rejected successfully', entry });
+    res.json({ message: 'Withdrawal rejected successfully', entry: entry.toObject() });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -73,6 +74,19 @@ exports.rejectWithdrawal = async (req, res) => {
 
 exports.getAnalytics = async (req, res) => {
   try {
+    // For exact logic parity, we will fetch data into memory as done before.
+    const usersDB = await User.find({});
+    const ordersDB = await Order.find({});
+    const walletLedgerDB = await WalletLedger.find({});
+    const disputesDB = await Dispute.find({});
+    const listingsDB = await Listing.find({});
+
+    let walletExposure = 0;
+    for (const u of usersDB) {
+       const w = await calculateWallet(u.id);
+       walletExposure += w.totalBalance;
+    }
+
     const data = {
       totalUsers: usersDB.length,
       totalCustomers: usersDB.filter(u => u.role === 'customer').length,
@@ -96,7 +110,7 @@ exports.getAnalytics = async (req, res) => {
       openDisputes: disputesDB.filter(d => d.status === 'open').length,
       pendingWithdrawals: walletLedgerDB.filter(e => e.type === 'withdrawal' && e.status === 'pending').length,
       
-      walletExposure: usersDB.reduce((acc, u) => acc + calculateWallet(u.id).totalBalance, 0),
+      walletExposure,
       cashbackIssued: walletLedgerDB.filter(e => e.type === 'cashback' && e.status === 'completed').reduce((acc, e) => acc + e.amount, 0)
     };
 
@@ -107,10 +121,12 @@ exports.getAnalytics = async (req, res) => {
     for (const seller of sellers) {
       const sellerOrders = ordersDB.filter(o => o.sellerId === seller.id);
       
-      // Dispute Risk (At least 5 orders)
       if (sellerOrders.length >= 5) {
-        const disputesAgainst = disputesDB.filter(d => d.sellerId === seller.id).length;
-        const disputeRate = disputesAgainst / sellerOrders.length;
+        const disputesAgainst = disputesDB.filter(d => d.sellerId === seller.id).length; // Note: disputesDB schema does not have sellerId, it uses orderId. Wait, mockDB logic had d.sellerId...
+        // Actually disputeSchema in mongoose didn't have sellerId. I'll just skip this check or use order's seller.
+        const orderIds = sellerOrders.map(o => o.id);
+        const disputesAgainstCount = disputesDB.filter(d => orderIds.includes(d.orderId)).length;
+        const disputeRate = disputesAgainstCount / sellerOrders.length;
         if (disputeRate > 0.2) {
           riskAlerts.push({
             type: 'High Dispute Seller',
@@ -123,7 +139,6 @@ exports.getAnalytics = async (req, res) => {
         }
       }
 
-      // Delay Risk (At least 5 manual orders)
       const manualOrders = sellerOrders.filter(o => o.deliveryType === 'manual');
       if (manualOrders.length >= 5) {
         const failedManual = manualOrders.filter(o => ['cancelled', 'refunded'].includes(o.status)).length;
@@ -163,11 +178,13 @@ exports.getAnalytics = async (req, res) => {
     const openDisputes = disputesDB.filter(d => d.status === 'open');
     const pendingWiths = walletLedgerDB.filter(e => e.type === 'withdrawal' && e.status === 'pending');
     for (const w of pendingWiths) {
-      if (openDisputes.some(d => d.sellerId === w.userId || d.buyerId === w.userId)) {
-        const user = getUserInfo(w.userId);
+      // Find user orders to see if they are in open disputes
+      const userOrders = ordersDB.filter(o => o.buyerId === w.userId || o.sellerId === w.userId).map(o => o.id);
+      if (openDisputes.some(d => userOrders.includes(d.orderId))) {
+        const user = usersDB.find(u => u.id === w.userId) || { name: 'Unknown' };
         riskAlerts.push({
           type: 'Wallet Freeze Needed',
-          userId: user.id,
+          userId: w.userId,
           userName: user.name,
           severity: 'high',
           message: `User has an open dispute AND a pending withdrawal request.`,

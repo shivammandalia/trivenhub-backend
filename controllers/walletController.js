@@ -1,8 +1,14 @@
-const { walletLedgerDB, usersDB, adminSettingsDB, saveDB } = require('../models/mockDB');
+const { WalletLedger, User } = require('../models');
 
 // Helper to calculate a user's wallet dynamically
-const calculateWallet = (userId) => {
-  const entries = walletLedgerDB.filter(entry => entry.userId === userId || entry.userId === usersDB.find(u => u.phone === userId)?.id);
+const calculateWallet = async (userId) => {
+  const user = await User.findOne({ $or: [{ id: userId }, { phone: userId }] });
+  const actualUserId = user ? user.id : userId;
+  const actualUserPhone = user ? user.phone : userId;
+
+  const entries = await WalletLedger.find({ 
+    $or: [{ userId: actualUserId }, { userId: actualUserPhone }] 
+  });
 
   let totalBalance = 0;
   let deposits = 0;
@@ -60,7 +66,7 @@ exports.calculateWallet = calculateWallet;
 exports.getWallet = async (req, res) => {
   try {
     const { userId } = req.params;
-    const wallet = calculateWallet(userId);
+    const wallet = await calculateWallet(userId);
     res.json(wallet);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -70,8 +76,14 @@ exports.getWallet = async (req, res) => {
 exports.getTransactions = async (req, res) => {
   try {
     const { userId } = req.params;
-    const entries = walletLedgerDB.filter(entry => entry.userId === userId || entry.userId === usersDB.find(u => u.phone === userId)?.id);
-    entries.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const user = await User.findOne({ $or: [{ id: userId }, { phone: userId }] });
+    const actualUserId = user ? user.id : userId;
+    const actualUserPhone = user ? user.phone : userId;
+
+    const entries = await WalletLedger.find({ 
+      $or: [{ userId: actualUserId }, { userId: actualUserPhone }] 
+    }).sort({ createdAt: -1 });
+
     res.json(entries);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -83,22 +95,19 @@ exports.deposit = async (req, res) => {
     const { userId, amount, label } = req.body;
     if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
 
-    const entry = {
+    const entry = await WalletLedger.create({
       id: `txn-${Date.now()}`,
       userId,
       type: 'deposit',
       amount: parseFloat(amount),
       status: 'completed',
       referenceType: 'deposit',
-      referenceId: null,
       label: label || 'Deposit',
-      createdAt: new Date().toISOString(),
-      availableAt: new Date().toISOString()
-    };
+      availableAt: new Date()
+    });
 
-    walletLedgerDB.push(entry);
-    saveDB('walletLedger');
-    res.status(201).json({ message: 'Deposit successful', entry, wallet: calculateWallet(userId) });
+    const wallet = await calculateWallet(userId);
+    res.status(201).json({ message: 'Deposit successful', entry: entry.toObject(), wallet });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -112,28 +121,25 @@ exports.withdrawRequest = async (req, res) => {
     if (withdrawAmount < 500) return res.status(400).json({ error: 'Minimum withdrawal is ₹500' });
     if (!upiId) return res.status(400).json({ error: 'UPI ID is required' });
 
-    const wallet = calculateWallet(userId);
+    const wallet = await calculateWallet(userId);
     if (wallet.withdrawableBalance < withdrawAmount) {
       return res.status(400).json({ error: 'Insufficient withdrawable balance' });
     }
 
-    const entry = {
+    const entry = await WalletLedger.create({
       id: `txn-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       userId,
       type: 'withdrawal',
       amount: -withdrawAmount, // negative
       status: 'pending', // Admins approve withdrawals
       referenceType: 'withdrawal',
-      referenceId: null,
       label: 'Withdrawal Request',
-      meta: { upiId },
-      createdAt: new Date().toISOString(),
-      availableAt: new Date().toISOString()
-    };
+      upiId,
+      availableAt: new Date()
+    });
 
-    walletLedgerDB.push(entry);
-    saveDB('walletLedger');
-    res.status(201).json({ message: 'Withdrawal requested successfully', entry, wallet: calculateWallet(userId) });
+    const newWallet = await calculateWallet(userId);
+    res.status(201).json({ message: 'Withdrawal requested successfully', entry: entry.toObject(), wallet: newWallet });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -143,22 +149,19 @@ exports.adminAdjust = async (req, res) => {
   try {
     const { userId, amount, reason, isPenalty } = req.body;
     
-    const entry = {
+    const entry = await WalletLedger.create({
       id: `txn-${Date.now()}`,
       userId,
       type: isPenalty ? 'penalty' : 'manual_adjustment',
       amount: parseFloat(amount),
       status: 'completed',
       referenceType: 'admin',
-      referenceId: null,
       label: reason || 'Admin Adjustment',
-      createdAt: new Date().toISOString(),
-      availableAt: new Date().toISOString()
-    };
+      availableAt: new Date()
+    });
 
-    walletLedgerDB.push(entry);
-    saveDB('walletLedger');
-    res.status(201).json({ message: 'Adjustment successful', entry, wallet: calculateWallet(userId) });
+    const wallet = await calculateWallet(userId);
+    res.status(201).json({ message: 'Adjustment successful', entry: entry.toObject(), wallet });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }

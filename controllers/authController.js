@@ -1,13 +1,13 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { usersDB, saveUsersDB } = require('../models/mockDB');
+const { User } = require('../models');
 
 exports.register = async (req, res) => {
   try {
     const { name, phone, password, role } = req.body;
 
     // Check if user exists
-    const existingUser = usersDB.find(u => u.phone === phone);
+    const existingUser = await User.findOne({ phone });
     if (existingUser) {
       return res.status(400).json({ error: 'Phone number already registered' });
     }
@@ -22,25 +22,23 @@ exports.register = async (req, res) => {
     }
 
     // Save user
-    const newUser = {
+    const newUser = await User.create({
       id: `u_${Date.now()}`,
       name,
       phone,
       password: hashedPassword,
       role: role === 'reseller' ? 'seller' : (role || 'customer'),
-      status,
-      createdAt: new Date().toISOString()
-    };
-    
-    usersDB.push(newUser);
-    saveUsersDB();
+      status
+    });
 
-    // Return success without password
-    const { password: _, ...userData } = newUser;
+    const userObj = newUser.toObject();
+    delete userObj.password;
+    delete userObj._id;
+    delete userObj.__v;
     
     res.status(201).json({
       message: 'Account created successfully',
-      user: userData
+      user: userObj
     });
 
   } catch (error) {
@@ -54,7 +52,7 @@ exports.login = async (req, res) => {
     const { phone, password } = req.body;
 
     // Find user
-    const user = usersDB.find(u => u.phone === phone);
+    const user = await User.findOne({ phone });
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }

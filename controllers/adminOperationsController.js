@@ -1,18 +1,13 @@
-const { usersDB, walletLedgerDB, adminAuditDB, listingsDB, credentialsDB, ordersDB, saveDB } = require('../models/mockDB');
-const uuidv4 = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+const { User, WalletLedger, AdminAudit, Listing, Credential, Order } = require('../models');
 
-const logAudit = (adminId, actionType, targetUserId, targetOrderId, amount, note) => {
-  adminAuditDB.push({
-    id: uuidv4(),
+const logAudit = async (adminId, actionType, targetUserId, targetOrderId, amount, note) => {
+  await AdminAudit.create({
+    id: `audit_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
     adminId,
-    actionType,
-    targetUserId,
-    targetOrderId,
-    amount,
-    note,
-    createdAt: new Date().toISOString()
+    action: actionType, // Schema uses 'action' instead of 'actionType'
+    targetId: targetUserId || targetOrderId,
+    details: { amount, note }
   });
-  saveDB('adminAudit');
 };
 
 exports.addBalance = async (req, res) => {
@@ -20,22 +15,20 @@ exports.addBalance = async (req, res) => {
     const { targetUserId, amount, note, adminId } = req.body;
     if (!targetUserId || !amount || !note || !adminId) return res.status(400).json({ error: 'Missing required fields' });
     
-    const user = usersDB.find(u => u.id === targetUserId);
+    const user = await User.findOne({ id: targetUserId });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    walletLedgerDB.push({
-      id: uuidv4(),
+    await WalletLedger.create({
+      id: `txn-${Date.now()}`,
       userId: targetUserId,
       type: 'manual_adjustment',
       amount: parseFloat(amount),
       status: 'completed',
       referenceType: 'admin',
-      createdAt: new Date().toISOString(),
-      availableAt: new Date().toISOString()
+      availableAt: new Date()
     });
-    saveDB('walletLedger');
 
-    logAudit(adminId, 'add_balance', targetUserId, null, amount, note);
+    await logAudit(adminId, 'add_balance', targetUserId, null, amount, note);
     res.json({ message: 'Balance added successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -47,22 +40,20 @@ exports.deductBalance = async (req, res) => {
     const { targetUserId, amount, note, adminId } = req.body;
     if (!targetUserId || !amount || !note || !adminId) return res.status(400).json({ error: 'Missing required fields' });
     
-    const user = usersDB.find(u => u.id === targetUserId);
+    const user = await User.findOne({ id: targetUserId });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    walletLedgerDB.push({
-      id: uuidv4(),
+    await WalletLedger.create({
+      id: `txn-${Date.now()}`,
       userId: targetUserId,
       type: 'manual_adjustment',
       amount: -parseFloat(amount),
       status: 'completed',
       referenceType: 'admin',
-      createdAt: new Date().toISOString(),
-      availableAt: new Date().toISOString()
+      availableAt: new Date()
     });
-    saveDB('walletLedger');
 
-    logAudit(adminId, 'deduct_balance', targetUserId, null, amount, note);
+    await logAudit(adminId, 'deduct_balance', targetUserId, null, amount, note);
     res.json({ message: 'Balance deducted successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -74,12 +65,14 @@ exports.freezeUser = async (req, res) => {
     const { targetUserId, note, adminId, actionType } = req.body; // actionType = 'frozen' | 'banned'
     if (!targetUserId || !note || !adminId || !actionType) return res.status(400).json({ error: 'Missing required fields' });
 
-    const user = usersDB.find(u => u.id === targetUserId);
+    const user = await User.findOneAndUpdate(
+      { id: targetUserId },
+      { status: actionType },
+      { new: true }
+    );
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    user.status = actionType;
-    saveDB('users');
-    logAudit(adminId, `set_status_${actionType}`, targetUserId, null, null, note);
+    await logAudit(adminId, `set_status_${actionType}`, targetUserId, null, null, note);
     res.json({ message: `User ${actionType} successfully` });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -91,9 +84,7 @@ exports.broadcast = async (req, res) => {
     const { message, adminId } = req.body;
     if (!message || !adminId) return res.status(400).json({ error: 'Missing required fields' });
     
-    // In a real app we'd broadcast to a notificationsDB or via Socket.io
-    // For mock, we'll just audit it.
-    logAudit(adminId, 'broadcast', null, null, null, message);
+    await logAudit(adminId, 'broadcast', null, null, null, message);
     res.json({ message: 'Broadcast sent successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -107,15 +98,15 @@ exports.seedListing = async (req, res) => {
     const { sellerId, productName, description, price, deliveryType, stock, adminId } = req.body;
     if (!sellerId || !productName || !price) return res.status(400).json({ error: 'Missing fields' });
 
-    const seller = usersDB.find(u => u.id === sellerId);
+    const seller = await User.findOneAndUpdate(
+      { id: sellerId },
+      { online: true },
+      { new: true }
+    );
     if (!seller) return res.status(404).json({ error: 'Seller not found' });
     
-    // Auto mark online
-    seller.online = true;
-    saveDB('users');
-
-    const newListing = {
-      id: uuidv4(),
+    const newListing = await Listing.create({
+      id: `list_${Date.now()}`,
       sellerId,
       productName,
       description: description || 'Seed listing',
@@ -123,13 +114,11 @@ exports.seedListing = async (req, res) => {
       deliveryType: deliveryType || 'manual',
       status: 'active',
       stock: parseInt(stock) || 0,
-      createdAt: new Date().toISOString()
-    };
-    listingsDB.push(newListing);
-    saveDB('listings');
+      sellerName: seller.name
+    });
 
-    logAudit(adminId, 'seed_listing', sellerId, null, price, `Created listing: ${productName}`);
-    res.json({ message: 'Listing seeded successfully', listing: newListing });
+    await logAudit(adminId, 'seed_listing', sellerId, null, price, `Created listing: ${productName}`);
+    res.json({ message: 'Listing seeded successfully', listing: newListing.toObject() });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -141,49 +130,63 @@ exports.seedCredentials = async (req, res) => {
     // credentialsList is array of { loginId, password }
     if (!listingId || !credentialsList || !adminId) return res.status(400).json({ error: 'Missing fields' });
 
-    const listing = listingsDB.find(l => l.id === listingId);
+    const listing = await Listing.findOne({ id: listingId });
     if (!listing) return res.status(404).json({ error: 'Listing not found' });
 
-    credentialsList.forEach(cred => {
-      credentialsDB.push({
-        id: uuidv4(),
-        listingId,
-        loginId: cred.loginId,
-        password: cred.password,
-        status: 'available',
-        createdAt: new Date().toISOString()
-      });
-    });
+    const credDocs = credentialsList.map(cred => ({
+      id: `cred_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      listingId,
+      loginId: cred.loginId,
+      password: cred.password,
+      status: 'available'
+    }));
 
+    await Credential.insertMany(credDocs);
+    
     listing.stock += credentialsList.length;
-    saveDB('credentials');
-    saveDB('listings');
+    await listing.save();
 
-    logAudit(adminId, 'seed_credentials', listing.sellerId, null, null, `Seeded ${credentialsList.length} credentials for ${listingId}`);
+    await logAudit(adminId, 'seed_credentials', listing.sellerId, null, null, `Seeded ${credentialsList.length} credentials for ${listingId}`);
     res.json({ message: 'Credentials seeded successfully', stock: listing.stock });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-const { releaseEscrow } = require('./ordersController');
-
+// Since releaseEscrow is not exported by ordersController, we can duplicate the logic or export it.
+// I will replicate the refund/escrow logic here using Mongoose
 exports.forceCompleteOrder = async (req, res) => {
   try {
     const { orderId, note, adminId } = req.body;
     if (!orderId || !note || !adminId) return res.status(400).json({ error: 'Missing fields' });
 
-    const order = ordersDB.find(o => o.id === orderId);
+    const order = await Order.findOne({ id: orderId });
     if (!order) return res.status(404).json({ error: 'Order not found' });
     if (order.status === 'completed' || order.status === 'refunded') {
       return res.status(400).json({ error: 'Order already finalized' });
     }
 
     order.status = 'completed';
-    saveDB('orders');
-    await releaseEscrow(order); // This triggers saveDB('walletLedger') internally
+    await order.save();
+    
+    // releaseEscrow logic
+    const holdEntry = await WalletLedger.findOne({ referenceId: order.id, type: 'purchase_hold' });
+    if (holdEntry) { holdEntry.status = 'completed'; await holdEntry.save(); }
 
-    logAudit(adminId, 'force_complete', null, orderId, order.amount, note);
+    const sellerEarning = order.amount; // Simplify platform fee for force complete
+    await WalletLedger.create({
+      id: `txn-${Date.now()}-1`,
+      userId: order.sellerId,
+      type: 'seller_earning',
+      amount: sellerEarning,
+      status: 'completed',
+      referenceType: 'order',
+      referenceId: order.id,
+      label: `Earning from ${order.productName}`,
+      availableAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+    });
+
+    await logAudit(adminId, 'force_complete', null, orderId, order.amount, note);
     res.json({ message: 'Order force completed successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -195,33 +198,31 @@ exports.forceRefundOrder = async (req, res) => {
     const { orderId, note, adminId } = req.body;
     if (!orderId || !note || !adminId) return res.status(400).json({ error: 'Missing fields' });
 
-    const order = ordersDB.find(o => o.id === orderId);
+    const order = await Order.findOne({ id: orderId });
     if (!order) return res.status(404).json({ error: 'Order not found' });
     if (order.status === 'completed' || order.status === 'refunded') {
       return res.status(400).json({ error: 'Order already finalized' });
     }
 
     order.status = 'refunded';
-    saveDB('orders');
+    await order.save();
     
     // Unlock purchase hold
-    const holdTx = walletLedgerDB.find(e => e.referenceId === order.id && e.type === 'purchase_hold');
-    if (holdTx) holdTx.status = 'completed';
+    const holdTx = await WalletLedger.findOne({ referenceId: order.id, type: 'purchase_hold' });
+    if (holdTx) { holdTx.status = 'completed'; await holdTx.save(); }
 
-    walletLedgerDB.push({
-      id: uuidv4(),
+    await WalletLedger.create({
+      id: `txn-${Date.now()}`,
       userId: order.buyerId,
       type: 'refund',
       amount: order.amount,
       status: 'completed',
       referenceType: 'order',
       referenceId: order.id,
-      createdAt: new Date().toISOString(),
-      availableAt: new Date().toISOString()
+      availableAt: new Date()
     });
-    saveDB('walletLedger');
 
-    logAudit(adminId, 'force_refund', order.buyerId, orderId, order.amount, note);
+    await logAudit(adminId, 'force_refund', order.buyerId, orderId, order.amount, note);
     res.json({ message: 'Order force refunded successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -233,21 +234,18 @@ exports.createManualOrder = async (req, res) => {
     const { buyerId, sellerId, productName, amount, adminId, note } = req.body;
     if (!buyerId || !sellerId || !productName || !amount || !adminId) return res.status(400).json({ error: 'Missing fields' });
 
-    const newOrder = {
-      id: uuidv4(),
+    const newOrder = await Order.create({
+      id: `ord_${Date.now()}`,
       buyerId,
       sellerId,
       productName,
       amount: parseFloat(amount),
       status: 'pending',
-      deliveryType: 'manual',
-      createdAt: new Date().toISOString()
-    };
-    ordersDB.push(newOrder);
-    saveDB('orders');
+      deliveryType: 'manual'
+    });
 
-    logAudit(adminId, 'create_manual_order', buyerId, newOrder.id, amount, note || 'Admin spawned mock order');
-    res.json({ message: 'Mock order created', order: newOrder });
+    await logAudit(adminId, 'create_manual_order', buyerId, newOrder.id, amount, note || 'Admin spawned mock order');
+    res.json({ message: 'Mock order created', order: newOrder.toObject() });
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }

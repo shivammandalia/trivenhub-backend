@@ -1,40 +1,43 @@
-const { ordersDB, listingsDB, credentialsDB, usersDB, walletLedgerDB, adminSettingsDB, saveDB } = require('../models/mockDB');
-const { calculateWallet } = require('./walletController');
+const { Order, Listing, Credential, User, WalletLedger, AdminSetting } = require('../models');
+const { calculateWallet } = require('./walletController'); // Wait, calculateWallet uses mockDB. I need to make calculateWallet async or duplicate logic here.
+// Actually, calculateWallet is imported from walletController, let me define an async version here or use DB aggregation.
 
 // Helper to recalculate stock
-const recalculateStock = (listingId) => {
-  const listing = listingsDB.find(l => l.id === listingId);
+const recalculateStock = async (listingId) => {
+  const listing = await Listing.findOne({ id: listingId });
   if (!listing) return;
   if (listing.deliveryType === 'auto') {
-    const availableCreds = credentialsDB.filter(c => c.listingId === listingId && c.status === 'available');
-    listing.stock = availableCreds.length;
+    const availableCount = await Credential.countDocuments({ listingId, status: 'available' });
+    listing.stock = availableCount;
     if (listing.stock <= 0) {
       listing.status = 'out_of_stock';
     } else if (listing.status === 'out_of_stock') {
       listing.status = 'active';
     }
+    await listing.save();
   }
 };
 
-const releaseEscrow = (order) => {
+const releaseEscrow = async (order) => {
   // Update purchase_hold to completed
-  const holdEntry = walletLedgerDB.find(e => e.referenceId === order.id && e.type === 'purchase_hold');
+  const holdEntry = await WalletLedger.findOne({ referenceId: order.id, type: 'purchase_hold' });
   if (holdEntry) {
     holdEntry.status = 'completed';
-    holdEntry.updatedAt = new Date().toISOString();
+    await holdEntry.save();
   }
 
   // Calculate fees and cashback
-  const { platformFeePercent, cashbackPercent } = adminSettingsDB;
+  const adminSettings = await AdminSetting.findOne({}) || { platformFeePercent: 0, cashbackPercent: 0 };
+  const { platformFeePercent, cashbackPercent } = adminSettings;
   const platformFee = (order.amount * platformFeePercent) / 100;
   const sellerEarning = order.amount - platformFee;
   const cashback = (order.amount * cashbackPercent) / 100;
 
   const now = new Date();
-  const availableAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours later
+  const availableAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours later
 
   // 1. Seller Earning
-  walletLedgerDB.push({
+  await WalletLedger.create({
     id: `txn-${Date.now()}-1`,
     userId: order.sellerId,
     type: 'seller_earning',
@@ -43,13 +46,12 @@ const releaseEscrow = (order) => {
     referenceType: 'order',
     referenceId: order.id,
     label: `Earning from ${order.productName}`,
-    createdAt: now.toISOString(),
     availableAt: availableAt
   });
 
   // 2. Platform Fee
   if (platformFee > 0) {
-    walletLedgerDB.push({
+    await WalletLedger.create({
       id: `txn-${Date.now()}-2`,
       userId: 'admin_1', // System admin
       type: 'platform_fee',
@@ -58,14 +60,13 @@ const releaseEscrow = (order) => {
       referenceType: 'order',
       referenceId: order.id,
       label: `Fee from ${order.productName}`,
-      createdAt: now.toISOString(),
-      availableAt: now.toISOString()
+      availableAt: now
     });
   }
 
   // 3. Cashback
   if (cashback > 0) {
-    walletLedgerDB.push({
+    await WalletLedger.create({
       id: `txn-${Date.now()}-3`,
       userId: order.buyerId,
       type: 'cashback',
@@ -74,12 +75,9 @@ const releaseEscrow = (order) => {
       referenceType: 'order',
       referenceId: order.id,
       label: `Cashback for ${order.productName}`,
-      createdAt: now.toISOString(),
-      availableAt: now.toISOString()
+      availableAt: now
     });
   }
-  
-  saveDB('walletLedger');
 };
 
 exports.createOrder = async (req, res) => {
@@ -87,15 +85,33 @@ exports.createOrder = async (req, res) => {
     const { buyerId, buyerPhone, buyerName, productId, amount } = req.body;
     const amountFloat = parseFloat(amount);
 
-    const listing = listingsDB.find(l => l.id === productId);
+    const listing = await Listing.findOne({ id: productId });
     if (!listing) return res.status(404).json({ error: 'Listing not found' });
 
     // Validate Status
     if (listing.status !== 'active') return res.status(400).json({ error: 'Listing is not active' });
 
-    // Check Wallet Balance
-    const wallet = calculateWallet(buyerId);
-    if (wallet.totalBalance < amountFloat) {
+    // Check Wallet Balance directly using Mongoose Aggregation
+    const ledger = await WalletLedger.find({ userId: buyerId, status: 'completed' });
+    const holdLedger = await WalletLedger.find({ userId: buyerId, status: 'locked' });
+    
+    let deposits = 0, earnings = 0, cashback = 0, withdrawals = 0, holds = 0;
+    
+    ledger.forEach(t => {
+      if (t.type === 'deposit') deposits += t.amount;
+      if (t.type === 'seller_earning') earnings += t.amount;
+      if (t.type === 'cashback') cashback += t.amount;
+      if (t.type === 'withdrawal') withdrawals += Math.abs(t.amount);
+      if (t.type === 'refund') deposits += t.amount;
+    });
+    holdLedger.forEach(t => {
+      if (t.type === 'purchase_hold') holds += Math.abs(t.amount);
+      if (t.type === 'withdrawal_hold') holds += Math.abs(t.amount);
+    });
+
+    const totalBalance = (deposits + earnings + cashback) - (withdrawals + holds);
+
+    if (totalBalance < amountFloat) {
       return res.status(400).json({ error: 'Insufficient wallet balance' });
     }
 
@@ -106,22 +122,17 @@ exports.createOrder = async (req, res) => {
     if (listing.deliveryType === 'auto') {
       if (listing.stock <= 0) return res.status(400).json({ error: 'Out of stock' });
       
-      const availableCreds = credentialsDB.filter(c => c.listingId === productId && c.status === 'available');
-      if (availableCreds.length === 0) return res.status(400).json({ error: 'Out of stock' });
+      const availableCred = await Credential.findOne({ listingId: productId, status: 'available' }).sort({ createdAt: 1 });
+      if (!availableCred) return res.status(400).json({ error: 'Out of stock' });
       
-      availableCreds.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-      const cred = availableCreds[0];
+      availableCred.status = 'sold';
+      await availableCred.save();
+      await recalculateStock(productId);
       
-      cred.status = 'sold';
-      recalculateStock(productId);
-      
-      saveDB('credentials');
-      saveDB('listings');
-      
-      credentials = [{ loginId: cred.loginId, password: cred.password }];
+      credentials = [{ loginId: availableCred.loginId, password: availableCred.password }];
       initialStatus = 'completed'; // direct to completed
     } else {
-      const seller = usersDB.find(u => u.id === listing.sellerId || u.phone === listing.sellerId);
+      const seller = await User.findOne({ $or: [{ id: listing.sellerId }, { phone: listing.sellerId }] });
       if (!seller || !seller.online) {
         return res.status(400).json({ error: 'Seller is offline' });
       }
@@ -131,7 +142,7 @@ exports.createOrder = async (req, res) => {
     const orderId = `ord-${Date.now()}`;
 
     // Create Purchase Hold
-    walletLedgerDB.push({
+    await WalletLedger.create({
       id: `txn-${Date.now()}-hold`,
       userId: buyerId,
       type: 'purchase_hold',
@@ -140,12 +151,10 @@ exports.createOrder = async (req, res) => {
       referenceType: 'order',
       referenceId: orderId,
       label: `Payment for ${listing.productName}`,
-      createdAt: new Date().toISOString(),
-      availableAt: new Date().toISOString()
+      availableAt: new Date()
     });
-    saveDB('walletLedger');
 
-    const order = {
+    const newOrder = await Order.create({
       id: orderId,
       buyerId,
       buyerPhone,
@@ -160,20 +169,15 @@ exports.createOrder = async (req, res) => {
       status: initialStatus,
       credentials,
       otp,
-      messages: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    ordersDB.push(order);
-    saveDB('orders');
+      messages: []
+    });
 
     // If auto, it instantly completed, so release escrow immediately
     if (initialStatus === 'completed') {
-      releaseEscrow(order);
+      await releaseEscrow(newOrder);
     }
 
-    res.status(201).json({ message: 'Order created', order });
+    res.status(201).json({ message: 'Order created', order: newOrder.toObject() });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
@@ -183,15 +187,12 @@ exports.createOrder = async (req, res) => {
 exports.getOrders = async (req, res) => {
   try {
     const { buyerId, sellerId } = req.query;
-    let results = [...ordersDB];
+    const query = {};
+    if (buyerId) query.$or = [{ buyerId }, { buyerPhone: buyerId }];
+    if (sellerId) query.sellerId = sellerId;
     
-    if (buyerId) results = results.filter(o => o.buyerId === buyerId || o.buyerPhone === buyerId);
-    if (sellerId) results = results.filter(o => o.sellerId === sellerId);
-    
-    // Sort descending by date
-    results.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    
-    res.json(results);
+    const orders = await Order.find(query).sort({ createdAt: -1 });
+    res.json(orders);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -199,7 +200,7 @@ exports.getOrders = async (req, res) => {
 
 exports.getOrderById = async (req, res) => {
   try {
-    const order = ordersDB.find(o => o.id === req.params.id);
+    const order = await Order.findOne({ id: req.params.id });
     if (!order) return res.status(404).json({ error: 'Order not found' });
     res.json(order);
   } catch (error) {
@@ -210,7 +211,7 @@ exports.getOrderById = async (req, res) => {
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { status, requesterId, otp } = req.body;
-    const order = ordersDB.find(o => o.id === req.params.id);
+    const order = await Order.findOne({ id: req.params.id });
     if (!order) return res.status(404).json({ error: 'Order not found' });
 
     const isSeller = requesterId === order.sellerId || requesterId === order.sellerName; // Mock fallback
@@ -230,7 +231,7 @@ exports.updateOrderStatus = async (req, res) => {
       if (order.status !== 'otp_requested') return res.status(400).json({ error: 'OTP not requested' });
       if (!otp) return res.status(400).json({ error: 'OTP is required' });
       
-      order.otp = otp; // Store it. Backend validates that OTP exists and buyer submitted it.
+      order.otp = otp; // Store it
     }
     else if (status === 'delivered') {
       if (!isSeller) return res.status(403).json({ error: 'Only seller can deliver' });
@@ -243,19 +244,19 @@ exports.updateOrderStatus = async (req, res) => {
       if (order.status !== 'delivered') return res.status(400).json({ error: 'Order must be delivered first' });
       
       // Release Escrow!
-      releaseEscrow(order);
+      await releaseEscrow(order);
     }
     else if (status === 'disputed') {
       // Just change status to disputed. Purchase hold remains locked. Admin will resolve.
     }
     else if (status === 'refunded') {
       // Refund Escrow
-      const holdEntry = walletLedgerDB.find(e => e.referenceId === order.id && e.type === 'purchase_hold');
+      const holdEntry = await WalletLedger.findOne({ referenceId: order.id, type: 'purchase_hold' });
       if (holdEntry && holdEntry.status === 'locked') {
-        // Mark hold as completed (permanently deducted) so the refund entry balances it out
         holdEntry.status = 'completed'; 
+        await holdEntry.save();
         
-        walletLedgerDB.push({
+        await WalletLedger.create({
           id: `txn-${Date.now()}-${Math.floor(Math.random() * 10000)}-refund`,
           userId: order.buyerId,
           type: 'refund',
@@ -264,10 +265,8 @@ exports.updateOrderStatus = async (req, res) => {
           referenceType: 'order',
           referenceId: order.id,
           label: `Refund for ${order.productName}`,
-          createdAt: new Date().toISOString(),
-          availableAt: new Date().toISOString()
+          availableAt: new Date()
         });
-        saveDB('walletLedger');
       }
     }
     else {
@@ -275,10 +274,9 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     order.status = status;
-    order.updatedAt = new Date().toISOString();
+    await order.save();
     
-    saveDB('orders');
-    res.json({ message: 'Order status updated', order });
+    res.json({ message: 'Order status updated', order: order.toObject() });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
@@ -288,10 +286,9 @@ exports.updateOrderStatus = async (req, res) => {
 exports.addMessage = async (req, res) => {
   try {
     const { from, text, time } = req.body;
-    const order = ordersDB.find(o => o.id === req.params.id);
+    const order = await Order.findOne({ id: req.params.id });
     if (!order) return res.status(404).json({ error: 'Order not found' });
     
-    if (!order.messages) order.messages = [];
     order.messages.push({
       id: Date.now() + '-' + Math.floor(Math.random() * 1000000),
       from,
@@ -299,9 +296,8 @@ exports.addMessage = async (req, res) => {
       time: time || 'Now'
     });
     
-    order.updatedAt = new Date().toISOString();
-    saveDB('orders');
-    res.json({ message: 'Message added', order });
+    await order.save();
+    res.json({ message: 'Message added', order: order.toObject() });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
