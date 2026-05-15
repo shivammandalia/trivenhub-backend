@@ -293,7 +293,7 @@ exports.addMessage = async (req, res) => {
     
     if (!order.messages) order.messages = [];
     order.messages.push({
-      id: Date.now(),
+      id: Date.now() + '-' + Math.floor(Math.random() * 1000000),
       from,
       text,
       time: time || 'Now'

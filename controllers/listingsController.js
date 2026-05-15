@@ -60,7 +60,9 @@ exports.createListing = async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    if (deliveryType === 'auto' && (!credentials || credentials.length === 0)) {
+    const normalizedDeliveryType = deliveryType.toString().toLowerCase();
+
+    if (normalizedDeliveryType === 'auto' && (!credentials || credentials.length === 0)) {
       return res.status(400).json({ error: 'Auto listing must have at least 1 credential pair' });
     }
 
@@ -73,8 +75,8 @@ exports.createListing = async (req, res) => {
       duration,
       price: parseFloat(price),
       description,
-      deliveryType,
-      stock: deliveryType === 'auto' ? credentials.length : (stock || 999),
+      deliveryType: normalizedDeliveryType,
+      stock: normalizedDeliveryType === 'auto' ? credentials.length : (stock || 999),
       status: 'active',
       rating: 5.0,
       createdAt: new Date().toISOString()
@@ -83,7 +85,7 @@ exports.createListing = async (req, res) => {
     listingsDB.push(newListing);
     saveDB('listings');
 
-    if (deliveryType === 'auto' && credentials) {
+    if (normalizedDeliveryType === 'auto' && credentials) {
       credentials.forEach(cred => {
         credentialsDB.push({
           id: `cred_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
@@ -115,7 +117,7 @@ exports.updateListing = async (req, res) => {
     if (price) listing.price = parseFloat(price);
     if (credentials) listing.credentials = credentials;
     if (stock !== undefined) listing.stock = parseInt(stock, 10);
-    if (deliveryType) listing.deliveryType = deliveryType;
+    if (deliveryType) listing.deliveryType = deliveryType.toString().toLowerCase();
     if (type) listing.duration = type;
     if (category) listing.category = category;
     if (status) listing.status = status;

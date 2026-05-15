@@ -32,8 +32,12 @@ const databases = {
   adminSettings: adminSettingsDB
 };
 
+const getDataDir = () => {
+  return process.env.DATA_DIR || path.join(__dirname, '../data');
+};
+
 const loadDB = (dbName) => {
-  const filePath = path.join(__dirname, `../data/${dbName}.json`);
+  const filePath = path.join(getDataDir(), `${dbName}.json`);
   if (fs.existsSync(filePath)) {
     try {
       const data = fs.readFileSync(filePath, 'utf8');
@@ -57,7 +61,7 @@ const loadDB = (dbName) => {
 };
 
 const saveDB = (dbName) => {
-  const filePath = path.join(__dirname, `../data/${dbName}.json`);
+  const filePath = path.join(getDataDir(), `${dbName}.json`);
   const tmpPath = `${filePath}.tmp`;
   try {
     // Atomic write: Write to .tmp first, then rename
@@ -70,7 +74,7 @@ const saveDB = (dbName) => {
 
 const initDB = async () => {
   // Ensure data dir exists
-  const dataDir = path.join(__dirname, '../data');
+  const dataDir = getDataDir();
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
