@@ -52,12 +52,35 @@ const migrate = async () => {
   ];
 
   for (const col of collections) {
-    const data = loadJSON(col.name);
+    let data = loadJSON(col.name);
     if (data && Array.isArray(data) && data.length > 0) {
+      
+      // Fix validation errors based on schema differences
+      if (col.name === 'users') {
+        data = data.map(u => ({ ...u, name: u.name || 'Unknown User', password: u.password || 'legacy_no_password' }));
+      }
+      if (col.name === 'credentials') {
+        data = data.map(c => ({ ...c, loginId: c.loginId || 'N/A' }));
+      }
+      if (col.name === 'adminAudit') {
+        data = data.map(a => ({
+          ...a,
+          action: a.actionType || a.action || 'unknown',
+          targetId: a.targetUserId || a.targetOrderId || 'none',
+          details: { amount: a.amount, note: a.note }
+        }));
+      }
+      if (col.name === 'payments') {
+        data = data.map(p => ({
+          ...p,
+          id: p.id || p.orderId,
+          orderId: p.orderId || p.id
+        }));
+      }
+
       console.log(`Migrating ${data.length} records into ${col.name}...`);
       try {
         await col.model.deleteMany({}); // Clear existing
-        // For WalletLedger, ensure availableAt is a Date object, etc. Mongoose will cast ISO strings to Date.
         await col.model.insertMany(data);
         console.log(`✅ ${col.name} migrated successfully.`);
       } catch (err) {
