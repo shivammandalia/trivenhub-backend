@@ -6,8 +6,6 @@ const connectDB = async () => {
     if (!dbURI) throw new Error("Database URI is missing in environment variables!");
 
     const conn = await mongoose.connect(dbURI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       serverSelectionTimeoutMS: 50000,
       socketTimeoutMS: 45000
     });
