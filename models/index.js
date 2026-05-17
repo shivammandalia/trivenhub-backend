@@ -14,16 +14,16 @@ const userSchema = new mongoose.Schema({
 
 const listingSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
-  sellerId: { type: String, required: true },
+  sellerId: { type: String, required: true, index: true },
   sellerName: { type: String, required: true },
   productName: { type: String, required: true },
   productImage: { type: String },
   duration: { type: String },
   price: { type: Number, required: true },
   description: { type: String },
-  deliveryType: { type: String, required: true }, // 'auto' or 'manual'
+  deliveryType: { type: String, required: true, index: true }, // 'auto' or 'manual'
   stock: { type: Number, default: 0 },
-  status: { type: String, default: 'active' },
+  status: { type: String, default: 'active', index: true },
   rating: { type: Number, default: 5.0 },
 }, { timestamps: true });
 
@@ -47,13 +47,13 @@ const orderSchema = new mongoose.Schema({
   productId: { type: String, required: true },
   productName: { type: String },
   productImage: { type: String },
-  sellerId: { type: String, required: true },
+  sellerId: { type: String, required: true, index: true },
   sellerName: { type: String },
-  buyerId: { type: String, required: true },
+  buyerId: { type: String, required: true, index: true },
   buyerName: { type: String },
   buyerPhone: { type: String },
   amount: { type: Number, required: true },
-  status: { type: String, required: true }, // 'new', 'accepted', 'otp_requested', 'otp_submitted', 'delivered', 'completed', 'cancelled', 'disputed'
+  status: { type: String, required: true, index: true }, // 'new', 'accepted', 'otp_requested', 'otp_submitted', 'delivered', 'completed', 'cancelled', 'disputed'
   deliveryType: { type: String }, // 'auto' or 'manual'
   timer: { type: String },
   messages: [messageSchema],
@@ -63,12 +63,12 @@ const orderSchema = new mongoose.Schema({
 
 const walletLedgerSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
-  userId: { type: String, required: true },
+  userId: { type: String, required: true, index: true },
   type: { type: String, required: true }, // 'deposit', 'withdrawal', 'purchase_hold', 'purchase_release', 'sale_credit', 'refund', 'penalty'
   amount: { type: Number, required: true },
-  status: { type: String, default: 'completed' }, // 'pending', 'completed', 'failed'
+  status: { type: String, default: 'completed', index: true }, // 'pending', 'completed', 'failed'
   referenceType: { type: String }, // 'order', 'deposit', 'withdrawal'
-  referenceId: { type: String },
+  referenceId: { type: String, index: true },
   label: { type: String },
   availableAt: { type: Date },
   upiId: { type: String },

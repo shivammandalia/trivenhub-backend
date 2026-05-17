@@ -18,7 +18,7 @@ const recalculateStock = async (listingId) => {
 
 exports.getListings = async (req, res) => {
   try {
-    const listings = await Listing.find({});
+    const listings = await Listing.find({}).limit(500).sort({ createdAt: -1 });
     // Need to attach seller online status
     const result = [];
     for (const listing of listings) {

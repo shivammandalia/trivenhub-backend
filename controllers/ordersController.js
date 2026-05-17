@@ -191,7 +191,7 @@ exports.getOrders = async (req, res) => {
     if (buyerId) query.$or = [{ buyerId }, { buyerPhone: buyerId }];
     if (sellerId) query.sellerId = sellerId;
     
-    const orders = await Order.find(query).sort({ createdAt: -1 });
+    const orders = await Order.find(query).limit(500).sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
